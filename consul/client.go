@@ -7,9 +7,12 @@ import (
 	api "github.com/hashicorp/consul/api"
 )
 
-func GetIps() ([]string, error) {
+func GetIps(ip string) ([]string, error) {
+	config := api.DefaultConfig()
+	config.Address = fmt.Sprintf("%s:8500", ip) 
+
 	// Get the ip list from the local hosts Consul instance
-	consul, err := api.NewClient(api.DefaultConfig())
+	consul, err := api.NewClient(config)
 	if err != nil {
 		return []string{}, err
 	}
@@ -20,7 +23,7 @@ func GetIps() ([]string, error) {
 		return []string{}, err
 	}
 
-	rval := make([]string, 0, len(nodes))
+	rval := make([]string, len(nodes))
 	for i, node := range(nodes) {
 		rval[i] = node.Address
 	}

@@ -2,6 +2,7 @@ package common
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 )
 
@@ -31,6 +32,7 @@ func RecvResponse(conn net.Conn) (*Result, error) {
 
 	var r Result
 	if err := d.Decode(&r); err != nil {
+		fmt.Println("RecvResponse failed")
 		return nil, err
 	}
 

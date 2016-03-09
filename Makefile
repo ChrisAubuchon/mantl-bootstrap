@@ -31,9 +31,9 @@ xcompile: deps test
 
 package: xcompile
 	$(eval FILES := $(shell ls build))
-	@mkdir -p build/tgz
+	@mkdir -p build/zip
 	for f in $(FILES); do \
-		(cd $(shell pwd)/build && tar -zcvf tgz/$$f.tar.gz $$f); \
+		(cd $(shell pwd)/build/$$f && zip -q ../zip/$$f.zip mantl-bootstrap); \
 		echo $$f; \
 	done
 

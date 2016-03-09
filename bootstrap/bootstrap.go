@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asteris-llc/mantl-bootstrap/cert"
 	"github.com/asteris-llc/mantl-bootstrap/common"
 	"github.com/asteris-llc/mantl-bootstrap/consul"
 	"github.com/asteris-llc/mantl-bootstrap/structs"
@@ -20,7 +21,7 @@ type Config struct {
 	Clients string
 	clientsSplit []string
 	Domain string
-	Cert *CertData
+	Cert *cert.CertData
 
 	isBootstrapped bool
 	secInfo *SecInfo
@@ -29,7 +30,7 @@ type Config struct {
 
 func Init(root *cobra.Command) {
 	c := Config{
-		Cert: &CertData{},
+		Cert: &cert.CertData{},
 	}
 
 	bCmd := &cobra.Command{
@@ -69,66 +70,80 @@ func (c *Config) Bootstrap(args []string) error {
 	if err := c.GetSecurityInfo(); err != nil {
 		return err
 	}
+	fmt.Printf("c.isBootstrapped = %v\n", c.isBootstrapped)
+
+	// Save my ip address for the end
+	myip := c.serversSplit[0]
 
 	if c.isBootstrapped {
+		fmt.Println("Getting consul Ips")
 		var err error
-		if c.consulIps, err = consul.GetIps(); err != nil {
+		if c.consulIps, err = consul.GetIps(myip); err != nil {
 			return err
 		}
 	}
 
+	fmt.Printf("Bootstrapping hosts: %s\n", c.Servers)
+
 	// Server nodes first
-	for _, ip := range(c.serversSplit) {
+	for i, ip := range(c.serversSplit) {
+		if i == 0 {
+			continue
+		}
+
 		if err := c.BootstrapNode(ip, true); err != nil {
 			return err
 		}
 	}
-//	for _, ip := range(c.ipsSplit) {
-//		bs := &structs.Bootstrap{
-//			GossipKey: secInfo.GossipKey,
-//			RootToken: secInfo.RootToken,
-//			RetryJoin: c.ipsSplit,
-//			AdvertiseAddr: ip,
-//			Cacert: secInfo.Cert,
-//		}
-//
-//		if !isBootstrapped {
-//			if err := WriteToConsul(bs, ip); err != nil {
-//				return err
-//			}
-//		} else {
-//			found := false
-//			for _, cip := range consulIps {
-//				if cip == ip {
-//					found = true
-//					break
-//				}
-//			}
-//
-//			if !found {
-//				if err := WriteToConsul(bs, ip); err != nil {
-//					return err
-//				}
-//			}
-//		}
-//	}
 
-	return nil
+	fmt.Println("Bootstrapping clients")
+	if len(c.clientsSplit) > 0 {
+		for _, ip := range(c.clientsSplit) {
+			if err := c.BootstrapNode(ip, false); err != nil {
+				return err
+			}
+		}
+	}
+
+	fmt.Println("Bootstrapping self")
+	return c.BootstrapNode(myip, true)
 }
 
 func (c *Config) BootstrapNode(ip string, isServer bool) error {
+	if ip == "" {
+		return nil
+	}
+
+	fmt.Printf("Bootstrapping ip %s\n", ip)
+
 	bs := &structs.Bootstrap{
 		GossipKey: c.secInfo.GossipKey,
 		RootToken: c.secInfo.RootToken,
 		RetryJoin: c.serversSplit,
 		AdvertiseAddr: ip,
 		Cacert: c.secInfo.Cert,
+		Cakey: c.secInfo.Key,
 		IsServer: isServer,
+		Domain: c.Domain,
 	}
 
 	if !c.isBootstrapped {
 		if err := c.SendConsulData(ip, bs); err != nil {	
 			return err
+		}
+	} else {
+		found := false
+		for _, cip := range c.consulIps {
+			if cip == ip {
+				fmt.Printf("ip: %s found. Skipping\n", ip)
+				found = true
+				break
+			}
+		}
+		if !found {
+			if err := c.SendConsulData(ip, bs); err != nil {
+				return err
+			}
 		}
 	}
 

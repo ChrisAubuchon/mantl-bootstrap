@@ -3,9 +3,12 @@ package bootstrap
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
+
+	"github.com/asteris-llc/mantl-bootstrap/cert"
 
 	"github.com/satori/go.uuid"
 )
@@ -16,6 +19,7 @@ type SecInfo struct {
 	RootToken string
 	GossipKey string
 	Cert      string
+	Key       string
 }
 
 
@@ -25,7 +29,10 @@ type SecInfo struct {
 // the current node is already bootstrapped
 //
 func (c *Config) GetSecurityInfo() (err error) {
-	cconfig := ReadConsulConfig()
+	cconfig, err := ReadConsulConfig()
+	if err != nil {
+		return err
+	}
 	if cconfig == nil {
 		c.isBootstrapped = false
 		c.secInfo, err = c.GenerateSecInfo()
@@ -34,7 +41,15 @@ func (c *Config) GetSecurityInfo() (err error) {
 	}
 	c.isBootstrapped = true
 
-	cert, err := ioutil.ReadFile(cconfig["cacert"].(string))
+	fmt.Println("isBootstrapped == true")
+	fmt.Printf("%+v\n", cconfig)
+
+	cert, err := ioutil.ReadFile(cconfig["ca_file"].(string))
+	if err != nil {
+		return err
+	}
+
+	key, err := ioutil.ReadFile("/etc/pki/CA/cacert.key")
 	if err != nil {
 		return err
 	}
@@ -43,17 +58,33 @@ func (c *Config) GetSecurityInfo() (err error) {
 		RootToken: cconfig["acl_master_token"].(string),
 		GossipKey: cconfig["encrypt"].(string),
 		Cert:      string(cert),
+		Key:       string(key),
 	}
 
 	return nil
 }
 
-func ReadConsulConfig() map[string]interface{} {
+func ReadConsulConfig() (map[string]interface{}, error) {
 	if _, err := os.Stat(Path); os.IsNotExist(err) {
-		return nil
+		return nil, nil
 	}
 
-	return nil
+	consulJson, err := ioutil.ReadFile(Path)
+	if err != nil {
+		return nil, err
+	}
+
+	rval := make(map[string]interface{})
+
+	if err := json.Unmarshal(consulJson, &rval); err != nil {
+		return nil, err
+	}
+
+	if _, ok := rval["encrypt"]; !ok {
+		return nil, nil
+	}
+
+	return rval, nil
 }
 
 func (c *Config) GenerateSecInfo() (*SecInfo, error) {
@@ -68,7 +99,7 @@ func (c *Config) GenerateSecInfo() (*SecInfo, error) {
 		return nil, fmt.Errorf("Couldn't read enough entropy.")
 	}
 
-	cert, err := GenerateCaCert(c.Cert)
+	cert, err := cert.GenerateCaCert(c.Cert)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +107,8 @@ func (c *Config) GenerateSecInfo() (*SecInfo, error) {
 	si := &SecInfo{
 		RootToken: uuid.NewV4().String(),
 		GossipKey: base64.StdEncoding.EncodeToString(key),
-		Cert: cert,
+		Cert: string(cert.Cert),
+		Key: string(cert.Key),
 	}
 
 	return si, nil
