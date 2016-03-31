@@ -16,16 +16,17 @@ import (
 )
 
 type Config struct {
-	Servers string
+	Servers      string
 	serversSplit []string
-	Clients string
+	Clients      string
 	clientsSplit []string
-	Domain string
-	Cert *cert.CertData
+	Domain       string
+	Cert         *cert.CertData
+	Datacenter   string
 
 	isBootstrapped bool
-	secInfo *SecInfo
-	consulIps []string
+	secInfo        *SecInfo
+	consulIps      []string
 }
 
 func Init(root *cobra.Command) {
@@ -34,9 +35,9 @@ func Init(root *cobra.Command) {
 	}
 
 	bCmd := &cobra.Command{
-		Use: "bootstrap",
+		Use:   "bootstrap",
 		Short: "Bootstrap Mantl nodes",
-		Long: "Bootstrap Mantl nodes",
+		Long:  "Bootstrap Mantl nodes",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if c.Servers == "" {
 				return fmt.Errorf("Must supply list of Consul server IPs")
@@ -53,15 +54,15 @@ func Init(root *cobra.Command) {
 
 	bCmd.Flags().StringVar(&c.Servers, "servers", "", "Comma separated list of Consul server IPs")
 	bCmd.Flags().StringVar(&c.Clients, "clients", "", "Comma separated list of Consul client IPs")
-        bCmd.Flags().StringVar(&c.Domain, "domain", "consul", "Consul DNS domain")
+	bCmd.Flags().StringVar(&c.Domain, "domain", "consul", "Consul DNS domain")
+	bCmd.Flags().StringVar(&c.Datacenter, "dc", "dc1", "Consul datacenter")
 
-        bCmd.Flags().StringVar(&c.Cert.Country, "cert-country", "US", "Certificate country")
-        bCmd.Flags().StringVar(&c.Cert.State, "cert-state", "New York", "Certificate state/province")
-        bCmd.Flags().StringVar(&c.Cert.Locality, "cert-locality", "Anytown", "Certificate locality/city")
-        bCmd.Flags().StringVar(&c.Cert.Org, "cert-organization", "Example Company Inc", "Certificate organization")
-        bCmd.Flags().StringVar(&c.Cert.Unit, "cert-unit", "Operations", "Certificate organizational unit inside of organization")
-        bCmd.Flags().StringVar(&c.Cert.Common, "cert-common", "mantl", "Certificate common name")
-
+	bCmd.Flags().StringVar(&c.Cert.Country, "cert-country", "US", "Certificate country")
+	bCmd.Flags().StringVar(&c.Cert.State, "cert-state", "New York", "Certificate state/province")
+	bCmd.Flags().StringVar(&c.Cert.Locality, "cert-locality", "Anytown", "Certificate locality/city")
+	bCmd.Flags().StringVar(&c.Cert.Org, "cert-organization", "Example Company Inc", "Certificate organization")
+	bCmd.Flags().StringVar(&c.Cert.Unit, "cert-unit", "Operations", "Certificate organizational unit inside of organization")
+	bCmd.Flags().StringVar(&c.Cert.Common, "cert-common", "mantl", "Certificate common name")
 
 	root.AddCommand(bCmd)
 }
@@ -78,7 +79,7 @@ func (c *Config) Bootstrap(args []string) error {
 	if c.isBootstrapped {
 		fmt.Println("Getting consul Ips")
 		var err error
-		if c.consulIps, err = consul.GetIps(myip); err != nil {
+		if c.consulIps, err = consul.GetIps(); err != nil {
 			return err
 		}
 	}
@@ -86,7 +87,7 @@ func (c *Config) Bootstrap(args []string) error {
 	fmt.Printf("Bootstrapping hosts: %s\n", c.Servers)
 
 	// Server nodes first
-	for i, ip := range(c.serversSplit) {
+	for i, ip := range c.serversSplit {
 		if i == 0 {
 			continue
 		}
@@ -98,7 +99,7 @@ func (c *Config) Bootstrap(args []string) error {
 
 	fmt.Println("Bootstrapping clients")
 	if len(c.clientsSplit) > 0 {
-		for _, ip := range(c.clientsSplit) {
+		for _, ip := range c.clientsSplit {
 			if err := c.BootstrapNode(ip, false); err != nil {
 				return err
 			}
@@ -117,18 +118,20 @@ func (c *Config) BootstrapNode(ip string, isServer bool) error {
 	fmt.Printf("Bootstrapping ip %s\n", ip)
 
 	bs := &structs.Bootstrap{
-		GossipKey: c.secInfo.GossipKey,
-		RootToken: c.secInfo.RootToken,
-		RetryJoin: c.serversSplit,
+		GossipKey:     c.secInfo.GossipKey,
+		RootToken:     c.secInfo.RootToken,
+		AgentToken:    c.secInfo.AgentToken,
+		RetryJoin:     c.serversSplit,
 		AdvertiseAddr: ip,
-		Cacert: c.secInfo.Cert,
-		Cakey: c.secInfo.Key,
-		IsServer: isServer,
-		Domain: c.Domain,
+		Cacert:        c.secInfo.Cert,
+		Cakey:         c.secInfo.Key,
+		IsServer:      isServer,
+		Domain:        c.Domain,
+		Datacenter:    c.Datacenter,
 	}
 
 	if !c.isBootstrapped {
-		if err := c.SendConsulData(ip, bs); err != nil {	
+		if err := c.SendConsulData(ip, bs); err != nil {
 			return err
 		}
 	} else {
@@ -183,5 +186,5 @@ func (c *Config) SendConsulData(ip string, bs *structs.Bootstrap) (err error) {
 	}
 
 	return nil
-	
+
 }

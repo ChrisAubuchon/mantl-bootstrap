@@ -1,8 +1,10 @@
 package main
 
 import (
+	"github.com/asteris-llc/mantl-bootstrap/agentacl"
 	"github.com/asteris-llc/mantl-bootstrap/bootstrap"
 	"github.com/asteris-llc/mantl-bootstrap/listen"
+	"github.com/asteris-llc/mantl-bootstrap/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -19,8 +21,10 @@ func initCommand(name, version string) *cobra.Command {
 		},
 	}
 
+	agentacl.Init(root)
 	bootstrap.Init(root)
 	listen.Init(root)
+	vault.Init(root)
 
 	return root
 }

@@ -9,19 +9,18 @@ import (
 	"os"
 
 	"github.com/asteris-llc/mantl-bootstrap/cert"
+	"github.com/asteris-llc/mantl-bootstrap/common"
 
 	"github.com/satori/go.uuid"
 )
 
-const Path = "/etc/consul/consul.json"
-
 type SecInfo struct {
-	RootToken string
-	GossipKey string
-	Cert      string
-	Key       string
+	AgentToken string
+	RootToken  string
+	GossipKey  string
+	Cert       string
+	Key        string
 }
-
 
 // GetSecurityInfo()
 // Return the Consul security information needed to add a node to an
@@ -41,9 +40,6 @@ func (c *Config) GetSecurityInfo() (err error) {
 	}
 	c.isBootstrapped = true
 
-	fmt.Println("isBootstrapped == true")
-	fmt.Printf("%+v\n", cconfig)
-
 	cert, err := ioutil.ReadFile(cconfig["ca_file"].(string))
 	if err != nil {
 		return err
@@ -55,21 +51,22 @@ func (c *Config) GetSecurityInfo() (err error) {
 	}
 
 	c.secInfo = &SecInfo{
-		RootToken: cconfig["acl_master_token"].(string),
-		GossipKey: cconfig["encrypt"].(string),
-		Cert:      string(cert),
-		Key:       string(key),
+		AgentToken: cconfig["acl_token"].(string),
+		RootToken:  cconfig["acl_master_token"].(string),
+		GossipKey:  cconfig["encrypt"].(string),
+		Cert:       string(cert),
+		Key:        string(key),
 	}
 
 	return nil
 }
 
 func ReadConsulConfig() (map[string]interface{}, error) {
-	if _, err := os.Stat(Path); os.IsNotExist(err) {
+	if _, err := os.Stat(common.ConsulStaticPath); os.IsNotExist(err) {
 		return nil, nil
 	}
 
-	consulJson, err := ioutil.ReadFile(Path)
+	consulJson, err := ioutil.ReadFile(common.ConsulStaticPath)
 	if err != nil {
 		return nil, err
 	}
@@ -105,12 +102,12 @@ func (c *Config) GenerateSecInfo() (*SecInfo, error) {
 	}
 
 	si := &SecInfo{
-		RootToken: uuid.NewV4().String(),
-		GossipKey: base64.StdEncoding.EncodeToString(key),
-		Cert: string(cert.Cert),
-		Key: string(cert.Key),
+		AgentToken: uuid.NewV4().String(),
+		RootToken:  uuid.NewV4().String(),
+		GossipKey:  base64.StdEncoding.EncodeToString(key),
+		Cert:       string(cert.Cert),
+		Key:        string(cert.Key),
 	}
 
 	return si, nil
 }
-

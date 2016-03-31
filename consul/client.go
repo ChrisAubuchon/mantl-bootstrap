@@ -1,18 +1,12 @@
 package consul
 
 import (
-	"fmt"
-	"time"
-
 	api "github.com/hashicorp/consul/api"
 )
 
-func GetIps(ip string) ([]string, error) {
-	config := api.DefaultConfig()
-	config.Address = fmt.Sprintf("%s:8500", ip) 
-
+func GetIps() ([]string, error) {
 	// Get the ip list from the local hosts Consul instance
-	consul, err := api.NewClient(config)
+	consul, err := api.NewClient(api.DefaultConfig())
 	if err != nil {
 		return []string{}, err
 	}
@@ -31,34 +25,20 @@ func GetIps(ip string) ([]string, error) {
 	return rval, nil
 }
 
-func Write(ip string, bytes []byte) error {
-	config := api.DefaultConfig()
-	config.Address = fmt.Sprintf("%s:8500", ip)
+func NewClient() *api.Client {
+	client, _ := api.NewClient(api.DefaultConfig())
 
-	consul, err := api.NewClient(config)
-	if err != nil {
-		return err
+	return client
+}
+
+func QueryOptions(token string) *api.QueryOptions {
+	return &api.QueryOptions{
+		Token: token,
 	}
+}
 
-	agent := consul.Agent()
-	for {
-		_, err := agent.Self()
-		if err == nil {
-			break
-		}
-
-		time.Sleep(5)
+func WriteOptions(token string) *api.WriteOptions {
+	return &api.WriteOptions{
+		Token: token,
 	}
-
-	kv := consul.KV()
-	kvp := api.KVPair{
-		Key: "bootstrap/consul",
-		Value: bytes,
-	}
-
-	if _, err := kv.Put(&kvp, &api.WriteOptions{}); err != nil {
-		return err
-	}
-
-	return nil
 }

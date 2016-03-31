@@ -11,3 +11,7 @@ func DefaultConfig() *Config {
 		Type: "tcp",
 	}
 }
+
+const (
+	ConsulStaticPath = "/etc/consul/static.json"
+)
