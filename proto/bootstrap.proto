@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package proto;
+
+message ConsulConfig {
+  bytes data = 1;
+}
+
+message FileData {
+  bytes data = 1;
+  string path = 2;
+  uint32 mode = 3;
+}
+
+message ShutdownMsg {
+  enum Code {
+    Success = 0;
+    Failure = 1;
+  }
+  Code code = 1;
+}
+
+message Response {
+  enum Code {
+    Success = 0;
+    Failure = 1;
+  }
+  Code code = 1;
+  string mesg = 2;
+}
+
+service BootstrapRPC {
+  rpc ConfigureConsul (ConsulConfig) returns (Response);
+  rpc WriteFile (FileData) returns (Response);
+  rpc Shutdown (ShutdownMsg) returns (Response);
+}

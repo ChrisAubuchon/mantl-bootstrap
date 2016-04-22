@@ -3,35 +3,38 @@ package bootstrap
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"strings"
-	"time"
 
-	"github.com/asteris-llc/mantl-bootstrap/cert"
 	"github.com/asteris-llc/mantl-bootstrap/common"
 	"github.com/asteris-llc/mantl-bootstrap/consul"
-	"github.com/asteris-llc/mantl-bootstrap/structs"
+	pb "github.com/asteris-llc/mantl-bootstrap/proto"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+	"google.golang.org/grpc"
+	"golang.org/x/net/context"
 )
 
-type Config struct {
-	Servers      string
-	serversSplit []string
-	Clients      string
-	clientsSplit []string
-	Domain       string
-	Cert         *cert.CertData
-	Datacenter   string
+const (
+	tag_isBootstrapped = "is-bootstrapped"
+	tag_caFileBytes = "ca_file_bytes"
+	tag_caKeyBytes = "ca_key_bytes"
+)
 
-	isBootstrapped bool
-	secInfo        *SecInfo
-	consulIps      []string
+type Bootstrap struct {
+	Config *viper.Viper
+	Consul *common.ConsulStatic
+
+	caFile []byte
+	caKey []byte
+
+	client pb.BootstrapRPCClient
 }
 
 func Init(root *cobra.Command) {
-	c := Config{
-		Cert: &cert.CertData{},
+	b := Bootstrap{
+		Config: viper.New(),
+		Consul: common.NewConsulConfig(),
 	}
 
 	bCmd := &cobra.Command{
@@ -39,104 +42,102 @@ func Init(root *cobra.Command) {
 		Short: "Bootstrap Mantl nodes",
 		Long:  "Bootstrap Mantl nodes",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if c.Servers == "" {
+			if !b.Config.IsSet("servers") {
 				return fmt.Errorf("Must supply list of Consul server IPs")
 			}
-			c.serversSplit = strings.Split(c.Servers, ",")
-			c.clientsSplit = strings.Split(c.Clients, ",")
 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return c.Bootstrap(args)
+			return b.Bootstrap(args)
 		},
 	}
 
-	bCmd.Flags().StringVar(&c.Servers, "servers", "", "Comma separated list of Consul server IPs")
-	bCmd.Flags().StringVar(&c.Clients, "clients", "", "Comma separated list of Consul client IPs")
-	bCmd.Flags().StringVar(&c.Domain, "domain", "consul", "Consul DNS domain")
-	bCmd.Flags().StringVar(&c.Datacenter, "dc", "dc1", "Consul datacenter")
+	bCmd.Flags().String("servers", "", "Comma separated list of Consul server IPs")
+	bCmd.Flags().String("clients", "", "Comma separated list of Consul client IPs")
+	bCmd.Flags().String("domain", "consul", "Consul DNS domain")
+	bCmd.Flags().String("dc", "dc1", "Consul datacenter")
 
-	bCmd.Flags().StringVar(&c.Cert.Country, "cert-country", "US", "Certificate country")
-	bCmd.Flags().StringVar(&c.Cert.State, "cert-state", "New York", "Certificate state/province")
-	bCmd.Flags().StringVar(&c.Cert.Locality, "cert-locality", "Anytown", "Certificate locality/city")
-	bCmd.Flags().StringVar(&c.Cert.Org, "cert-organization", "Example Company Inc", "Certificate organization")
-	bCmd.Flags().StringVar(&c.Cert.Unit, "cert-unit", "Operations", "Certificate organizational unit inside of organization")
-	bCmd.Flags().StringVar(&c.Cert.Common, "cert-common", "mantl", "Certificate common name")
+	bCmd.Flags().String("cert-country", "US", "Certificate country")
+	bCmd.Flags().String("cert-state", "New York", "Certificate state/province")
+	bCmd.Flags().String("cert-locality", "Anytown", "Certificate locality/city")
+	bCmd.Flags().String("cert-organization", "Example Company Inc", "Certificate organization")
+	bCmd.Flags().String("cert-unit", "Operations", "Certificate organizational unit inside of organization")
+	bCmd.Flags().String("cert-common", "mantl", "Certificate common name")
+
+	b.Config.BindPFlags(bCmd.Flags())
 
 	root.AddCommand(bCmd)
 }
 
-func (c *Config) Bootstrap(args []string) error {
-	if err := c.GetSecurityInfo(); err != nil {
+func (b *Bootstrap) Bootstrap(args []string) error {
+	if err := b.GenConsulConfig(); err != nil {
 		return err
 	}
-	fmt.Printf("c.isBootstrapped = %v\n", c.isBootstrapped)
 
 	// Save my ip address for the end
-	myip := c.serversSplit[0]
+	servers := strings.Split(b.Config.GetString("servers"), ",")
+	clients := strings.Split(b.Config.GetString("clients"), ",")
+	myip := servers[0]
 
-	if c.isBootstrapped {
+	if b.Config.GetBool("is_bootstrapped") {
 		fmt.Println("Getting consul Ips")
-		var err error
-		if c.consulIps, err = consul.GetIps(); err != nil {
+		consulIps, err := consul.GetIps()
+		if err != nil {
 			return err
 		}
+
+		b.Config.Set("existing-ips", consulIps)
 	}
 
-	fmt.Printf("Bootstrapping hosts: %s\n", c.Servers)
+	fmt.Printf("Bootstrapping hosts: %s\n", b.Config.GetString("servers"))
+
+	b.Consul.RetryJoin = servers
 
 	// Server nodes first
-	for i, ip := range c.serversSplit {
+	for i, ip := range servers {
 		if i == 0 {
 			continue
 		}
 
-		if err := c.BootstrapNode(ip, true); err != nil {
+		if err := b.BootstrapNode(ip, true); err != nil {
 			return err
 		}
 	}
 
 	fmt.Println("Bootstrapping clients")
-	if len(c.clientsSplit) > 0 {
-		for _, ip := range c.clientsSplit {
-			if err := c.BootstrapNode(ip, false); err != nil {
+	if len(clients) > 0 {
+		for _, ip := range clients {
+			if err := b.BootstrapNode(ip, false); err != nil {
 				return err
 			}
 		}
 	}
 
 	fmt.Println("Bootstrapping self")
-	return c.BootstrapNode(myip, true)
+	return b.BootstrapNode(myip, true)
 }
 
-func (c *Config) BootstrapNode(ip string, isServer bool) error {
+func (b *Bootstrap) BootstrapNode(ip string, isServer bool) error {
 	if ip == "" {
 		return nil
 	}
 
 	fmt.Printf("Bootstrapping ip %s\n", ip)
 
-	bs := &structs.Bootstrap{
-		GossipKey:     c.secInfo.GossipKey,
-		RootToken:     c.secInfo.RootToken,
-		AgentToken:    c.secInfo.AgentToken,
-		RetryJoin:     c.serversSplit,
-		AdvertiseAddr: ip,
-		Cacert:        c.secInfo.Cert,
-		Cakey:         c.secInfo.Key,
-		IsServer:      isServer,
-		Domain:        c.Domain,
-		Datacenter:    c.Datacenter,
-	}
+	b.Consul.AdvertiseAddr = ip
+	b.Consul.Server = isServer
+	b.Consul.Domain = b.Config.GetString("domain")
+	b.Consul.Datacenter = b.Config.GetString("dc")
+	b.Consul.AclDatacenter = b.Config.GetString("dc")
 
-	if !c.isBootstrapped {
-		if err := c.SendConsulData(ip, bs); err != nil {
+	if !b.Config.GetBool(tag_isBootstrapped) {
+		if err := b.Configure(ip); err != nil {
 			return err
 		}
 	} else {
 		found := false
-		for _, cip := range c.consulIps {
+		for _, cip := range b.Config.GetStringSlice("existing-ips") {
 			if cip == ip {
 				fmt.Printf("ip: %s found. Skipping\n", ip)
 				found = true
@@ -144,7 +145,7 @@ func (c *Config) BootstrapNode(ip string, isServer bool) error {
 			}
 		}
 		if !found {
-			if err := c.SendConsulData(ip, bs); err != nil {
+			if err := b.Configure(ip); err != nil {
 				return err
 			}
 		}
@@ -153,38 +154,96 @@ func (c *Config) BootstrapNode(ip string, isServer bool) error {
 	return nil
 }
 
-func (c *Config) SendConsulData(ip string, bs *structs.Bootstrap) (err error) {
+func (b *Bootstrap) Configure(ip string) error {
 	nc := common.DefaultConfig()
 
-	var conn net.Conn
-	for {
-		if conn, err = net.Dial(nc.Type, fmt.Sprintf("%s:%d", ip, nc.Port)); err != nil {
-			fmt.Println(err)
-			fmt.Println("Trying again in 10 seconds")
-			time.Sleep(10 * time.Second)
-			continue
-		}
-
-		break
-	}
-
-	defer conn.Close()
-
-	// Connected. Encode bs and send
-	e := json.NewEncoder(conn)
-	if err := e.Encode(bs); err != nil {
+	conn, err := grpc.Dial(fmt.Sprintf("%s:%d", ip, nc.Port), grpc.WithInsecure())
+	if err != nil {
 		return err
 	}
+	defer conn.Close()
+	b.client = pb.NewBootstrapRPCClient(conn)
 
-	result, err := common.RecvResponse(conn)
+	consulJson, err := json.Marshal(b.Consul)
 	if err != nil {
 		return err
 	}
 
-	if result.Value != common.MSG_SUCCESS {
-		return fmt.Errorf(result.Message)
+	// Write certificate and key
+	fmt.Printf("Sending '%s' file\n", b.Consul.CaFile)
+	if err := b.writeFile(b.caFile, b.Consul.CaFile, 0644); err != nil {
+		return err
+	}
+
+	fmt.Printf("Sending '%s' file\n", common.CaCertAnchorPath)
+	if err := b.writeFile(b.caFile, common.CaCertAnchorPath, 0600); err != nil {
+		return err
+	}
+
+	fmt.Printf("Sending '%s' file\n", common.CaKeyPath)
+	if err := b.writeFile(b.caKey, common.CaKeyPath, 0644); err != nil {
+		return err
+	}
+
+	// Write Consul Configuration
+	if err := b.configureConsul(consulJson); err != nil {
+		return err
+	}
+
+	if err := b.shutdown(true); err != nil {
+		return err
 	}
 
 	return nil
+}
 
+// Convenience functions for RPC commands
+//
+
+func (b *Bootstrap) writeFile(data []byte, path string, mode uint32) error {
+	r, err := b.client.WriteFile(context.Background(),
+		&pb.FileData{
+			Data: data,
+			Path: path,
+			Mode: mode,
+		})
+	if err != nil {
+		return err
+	}
+
+	if r.Code != pb.Response_Success {
+		return fmt.Errorf("%s", r.Mesg)	
+	}
+
+	return nil
+}
+
+func (b *Bootstrap) configureConsul(cdata []byte) error {
+	r, err := b.client.ConfigureConsul(context.Background(), &pb.ConsulConfig{Data:cdata})
+	if err != nil {
+		return err
+	}
+
+	if r.Code != pb.Response_Success {
+		return fmt.Errorf("%s", r.Mesg)	
+	}
+
+	return nil
+}
+
+func (b *Bootstrap) shutdown(success bool) error {
+	msg := pb.ShutdownMsg{ Code: pb.ShutdownMsg_Failure }
+	if success {
+		msg.Code = pb.ShutdownMsg_Success
+	}
+	r, err := b.client.Shutdown(context.Background(), &msg)
+	if err != nil {
+		return err
+	}
+
+	if r.Code != pb.Response_Success {
+		return fmt.Errorf("%s", r.Mesg)	
+	}
+
+	return nil
 }
