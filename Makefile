@@ -37,4 +37,7 @@ package: xcompile
 		echo $$f; \
 	done
 
+pb: 
+	protoc -I ./proto ./proto/*.proto --go_out=plugins=grpc:proto
+
 .PHONY: all deps updatedeps build test xcompile package

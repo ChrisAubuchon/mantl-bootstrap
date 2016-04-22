@@ -5,30 +5,31 @@ import (
 	"crypto/x509"
 	"net"
 
+	"github.com/spf13/viper"
 	"github.com/square/certstrap/pkix"
 )
-
-type CertData struct {
-	Country string
-	State string
-	Locality string
-	Org string
-	Unit string
-	Common string
-}
 
 type Cert struct {
 	Cert []byte
 	Key []byte
 }
 
-func GenerateCaCert(cd *CertData) (*Cert, error) {
+func GenerateCaCert(config *viper.Viper) (*Cert, error) {
 	key, err := pkix.CreateRSAKey(2048)
 	if err != nil {
 		return nil, err
 	}
 
-	cert, err := pkix.CreateCertificateAuthority(key, cd.Unit, 1, cd.Org, cd.Country, cd.State, cd.Locality, cd.Common)
+	cert, err := pkix.CreateCertificateAuthority(
+		key, 
+		viper.GetString("cert-unit"),
+		1,
+		viper.GetString("cert-organization"),
+		viper.GetString("cert-country"),
+		viper.GetString("cert-state"),
+		viper.GetString("cert-locality"),
+		viper.GetString("cert-common"),
+		)
 	if err != nil {
 		return nil, err
 	}
@@ -36,13 +37,13 @@ func GenerateCaCert(cd *CertData) (*Cert, error) {
 	return newCert(cert, key)
 }
 
-func GenerateCert(pcertS string, pkeyS string, ip string, domain string) (*Cert, error) {
+func GenerateCert(caCert []byte, caKey []byte, ip string, domain string) (*Cert, error) {
 	key, err := pkix.CreateRSAKey(2048)
 	if err != nil {
 		return nil, err
 	}
 
-	pcert, err := pkix.NewCertificateFromPEM([]byte(pcertS))
+	pcert, err := pkix.NewCertificateFromPEM(caCert)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func GenerateCert(pcertS string, pkeyS string, ip string, domain string) (*Cert,
 		return nil, err
 	}
 
-	pkey, err := pkix.NewKeyFromPrivateKeyPEM([]byte(pkeyS))
+	pkey, err := pkix.NewKeyFromPrivateKeyPEM(caKey)
 	if err != nil {
 		return nil, err
 	}

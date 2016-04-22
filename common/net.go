@@ -12,7 +12,7 @@ type Result struct {
 }
 
 const (
-	MSG_SUCCESS = iota
+	MSG_SUCCESS = 200
 	MSG_FAILURE
 )
 
