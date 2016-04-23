@@ -80,7 +80,7 @@ func (b *Bootstrap) Bootstrap(args []string) error {
 	clients := strings.Split(b.Config.GetString("clients"), ",")
 	myip := servers[0]
 
-	if b.Config.GetBool("is_bootstrapped") {
+	if b.Config.GetBool(tag_isBootstrapped) {
 		fmt.Println("Getting consul Ips")
 		consulIps, err := consul.GetIps()
 		if err != nil {
