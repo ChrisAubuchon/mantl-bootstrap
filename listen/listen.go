@@ -89,7 +89,7 @@ func (s *server) ConfigureConsul(ctx context.Context, in *pb.ConsulConfig) (*pb.
 	if err != nil {
 		return failure(err), err
 	}
-	ioutil.WriteFile(common.ConsulStaticPath, consulJson, 0660)
+	ioutil.WriteFile(common.ConsulStaticPath, consulJson, 0664)
 	cmd := exec.Command("chown", "consul:consul", common.ConsulStaticPath)
 	if err := cmd.Run(); err != nil {
 		return failure(err), err
